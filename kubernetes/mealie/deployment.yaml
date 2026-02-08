@@ -18,7 +18,7 @@ spec:
       containers:
         # intentionally we are going to use an older version of
         # mealie to test the upgrade process
-        - image: ghcr.io/mealie-recipes/mealie:v1.2.0
+        - image: ghcr.io/mealie-recipes/mealie:v1.3.2
           name: mealie
           ports:
             - containerPort: 9000
