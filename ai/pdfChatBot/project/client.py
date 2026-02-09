@@ -1,113 +1,148 @@
-import os
-import time
-import json
-from typing import List, Dict
 import requests
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, VectorParams, PointStruct
+
+# Define some Kubernetes concepts and their descriptions to use as our dataset for the embedding demo
+# In a real application, you would likely have a much larger and more complex dataset, but this will serve as a simple 
+# example to demonstrate how to use embeddings with Qdrant.
+# 
+# The descriptions are taken from the official Kubernetes documentation and are simplified for demonstration purposes.
+# You can expand this dataset with more concepts and more detailed descriptions as needed for your application.
+# The key point is that we have a set of text descriptions that we want to convert into embeddings and store in Qdrant, 
+# so that we can later search for relevant concepts based on a query.
+# 
+# In this example, we will use the following Kubernetes concepts: Pod, Service, Deployment, ConfigMap, and Secret.
+# Each concept has a description that explains what it is and how it is used in Kubernetes.
+# 
+# You can modify the descriptions or add more concepts to better fit your use case or to create a more comprehensive 
+# knowledge base for your application.
+k8s_concepts = [
+    {
+        "concept": "Pod",
+        "description": """Pods are the smallest deployable units of computing that you can create and manage in Kubernetes.
+A Pod (as in a pod of whales or pea pod) is a group of one or more containers, with shared storage and network resources, and a specification for how to run the containers.
+A Pod's contents are always co-located and co-scheduled, and run in a shared context.
+A Pod models an application-specific "logical host": it contains one or more application containers which are relatively tightly coupled.
+In non-cloud contexts, applications executed on the same physical or virtual machine are analogous to cloud applications executed on the same logical host.
+As well as application containers, a Pod can contain init containers that run during Pod startup.
+You can also inject ephemeral containers for debugging a running Pod.""",
+    },
+    {
+        "concept": "Service",
+        "description": """Expose an application running in your cluster behind a single outward-facing endpoint, even when the workload is split across multiple backends.
+In Kubernetes, a Service is a method for exposing a network application that is running as one or more Pods in your cluster.
+A key aim of Services in Kubernetes is that you don't need to modify your existing application to use an unfamiliar service discovery mechanism.
+You can run code in Pods, whether this is a code designed for a cloud-native world, or an older app you've containerized.
+You use a Service to make that set of Pods available on the network so that clients can interact with it.
+If you use a Deployment to run your app, that Deployment can create and destroy Pods dynamically.
+From one moment to the next, you don't know how many of those Pods are working and healthy; you might not even know what those healthy Pods are named.
+Kubernetes Pods are created and destroyed to match the desired state of your cluster.
+Pods are ephemeral resources (you should not expect that an individual Pod is reliable and durable).
+Each Pod gets its own IP address (Kubernetes expects network plugins to ensure this).
+For a given Deployment in your cluster, the set of Pods running in one moment in time could be different from the set of Pods running that application a moment later.
+This leads to a problem: if some set of Pods (call them "backends") provides functionality to other Pods (call them "frontends") inside your cluster, how do the frontends find out and keep track of which IP address to connect to, so that the frontend can use the backend part of the workload?
+Enter Services.""",
+    },
+    {
+        "concept": "Deployment",
+        "description": """A Deployment manages a set of Pods to run an application workload, usually one that doesn't maintain state.
+A Deployment provides declarative updates for Pods and ReplicaSets.
+You describe a desired state in a Deployment, and the Deployment Controller changes the actual state to the desired state at a controlled rate.
+You can define Deployments to create new ReplicaSets, or to remove existing Deployments and adopt all their resources with new Deployments.""",
+    },
+    {
+        "concept": "ConfigMap",
+        "description": """A ConfigMap is an API object used to store non-confidential data in key-value pairs.
+Pods can consume ConfigMaps as environment variables, command-line arguments, or as configuration files in a volume.
+A ConfigMap allows you to decouple environment-specific configuration from your container images, so that your applications are easily portable.""",
+    },
+    {
+        "concept": "Secret",
+        "description": """A Secret is an object that contains a small amount of sensitive data such as a password, a token, or a key.
+Such information might otherwise be put in a Pod specification or in a container image.
+Using a Secret means that you don't need to include confidential data in your application code.
+Because Secrets can be created independently of the Pods that use them, there is less risk of the Secret (and its data) being exposed during the workflow of creating, viewing, and editing Pods.
+Kubernetes, and applications that run in your cluster, can also take additional precautions with Secrets, such as avoiding writing sensitive data to nonvolatile storage.
+Secrets are similar to ConfigMaps but are specifically intended to hold confidential data.""",
+    },
+]
 
 
-class LLMClient:
-    """Simple client for interacting with LocalAI's API with streaming support"""
+def get_embedding(text):
+    """Get embeddings from the sentence-transformers API"""
+    response = requests.post("http://embeddings:8080/embed", json={"text": text})
+    embedding = response.json()
+    preview = [f"{x:.4f}" for x in embedding[:15]]
+    print(f"Embedding vector for user input: [{', '.join(preview)}, ...]")
+    return embedding
 
-    def __init__(self, api_base: str = "http://localhost:8080/v1"):
-        self.api_base = api_base
-        self.headers = {"Content-Type": "application/json"}
 
-    def list_models(self) -> List[Dict]:
-        """List available models"""
-        response = requests.get(f"{self.api_base}/models")
-        return response.json()
+def setup_embedding_demo():
+    print("\n🚀 Starting Simple Embeddings Demo...")
 
-    # The formatting is important to ensure the model understands the conversation structure
-    # in our case its about the huggingface phi models, which expect a specific format for system, 
-    # user, and assistant messages
-    def _format_phi_messages(self, messages: List[Dict]) -> str:
-        """Format messages for Phi model's expected input format"""
-        formatted = ""
+    print("🔤 Testing embedding service...")
+    test_embedding = get_embedding("test")
+    vector_size = len(test_embedding)
 
-        system_msg = next((msg for msg in messages if msg["role"] == "system"), None)
-        if system_msg:
-            formatted += f"<|system|>{system_msg['content']}<|end|>"
+    print("📦 Connecting to Qdrant...")
+    client = QdrantClient(host="qdrant", port=6333)
+    collection_name = "k8s_concepts"
 
-        user_msgs = [msg for msg in messages if msg["role"] == "user"]
-        if user_msgs:
-            formatted += f"<|user|>{user_msgs[-1]['content']}<|end|><|assistant|>"
+    try:
+        client.delete_collection(collection_name)
+    except:
+        pass
 
-        return formatted
+    client.create_collection(
+        collection_name=collection_name,
+        vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+    )
 
-    def chat_blocking(
-        self,
-        messages: List[Dict],
-        model: str = "phi-3.5-mini-instruct",
-    ) -> str:
-        """Send a blocking (non-streaming) chat completion request"""
-        formatted_prompt = self._format_phi_messages(messages)
+    print("\n💫 Creating embeddings for Kubernetes concepts...")
 
-        data = {
-            "prompt": formatted_prompt,
-            "model": model,
-            "stream": False,
-            "top_p": 0.1,
-            # control the randomness of the output, lower values make 
-            # it more deterministic
-            "temperature": 0.3,
-            "stop": ["<|endoftext|>", "<|end|>"],
-            "max_tokens": 1024,
-            "presence_penalty": 0.0,
-            "frequency_penalty": 0.0,
-        }
+    for i, concept in enumerate(k8s_concepts):
+        # Get the embedding for the concept description
+        embedding = get_embedding(concept["description"])
 
-        start_time = time.time()
-
-        response = requests.post(
-            f"{self.api_base}/completions", headers=self.headers, json=data
+        # Create a point with the embedding and metadata
+        point = PointStruct(
+            id=i,
+            vector=embedding,
+            payload={
+                "concept": concept["concept"],
+                "description": concept["description"],
+            },
         )
 
-        if response.status_code != 200:
-            raise Exception(f"Error: {response.text}")
+        # Upsert the point to the Qdrant collection
+        client.upsert(collection_name=collection_name, points=[point])
 
-        result = response.json()
-        elapsed_time = time.time() - start_time
+        print(f"✅ Stored: {concept['concept']}")
 
-        if result.get("choices") and len(result["choices"]) > 0:
-            content = result["choices"][0].get("text", "")
-            print("Time taken:", elapsed_time)
-            return content
+    print("\n🔍 Let's test our embeddings with a search...")
+    query = "How can I store a password in Kubernetes?"
+    
+    print("\nQuery:", query)
+    query_embedding = get_embedding(query)
 
-        raise Exception("No valid response received from the API")
+    # Search for the 2 most relevant concepts in the Qdrant collection for 
+    # the query embedding
+    search_results = client.query_points(
+        collection_name=collection_name, query=query_embedding, limit=2
+    )
 
+    print("\nTop 2 most relevant results:")
+    for result in search_results.points:
+        
+        # Print the concept name from the payload of the search result
+        print(f"\n• {result.payload['concept']}:")
+        
+        # Print the description of the concept from the payload
+        print(f"  {result.payload['description']}")
 
-def demonstrate_capabilities():
-    """Show basic capabilities of the LLM with streaming responses"""
-    llm = LLMClient(os.getenv("LLM_API_BASE", "http://localhost:8080/v1"))
-
-    print("\nAvailable Models:")
-    try:
-        models = llm.list_models()
-        print(json.dumps(models, indent=2))
-    except Exception as e:
-        print(f"Error listing models: {e}")
-
-    examples = [
-        {
-            "title": "DevOps Explanation",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "What is DevOps in one sentence?",
-                },
-            ],
-        },
-    ]
-
-    for example in examples:
-        print(f"\nExample: {example['title']}")
-        print("Response:")
-
-        response = llm.chat_blocking(example["messages"])
-        print(response)
+        # Print the similarity score (cosine similarity) for the result
+        print(f"  Similarity score: {result.score:.4f}")
 
 
 if __name__ == "__main__":
-    print("🤖 LocalAI Streaming Client Demo")
-    print("Testing connection to LocalAI and demonstrating basic capabilities...")
-    demonstrate_capabilities()
+    setup_embedding_demo()
