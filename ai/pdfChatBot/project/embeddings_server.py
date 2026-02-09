@@ -18,14 +18,9 @@ model_initialized = False
 try:
     # HuggingFaceEmbeddings will automatically handle model downloading and caching
     embeddings = HuggingFaceEmbeddings(
-        # all-MiniLM-L6-v2 is a smaller, faster model suitable for CPU inference
         model_name="sentence-transformers/all-MiniLM-L6-v2",
-        # matches our volume mount
-        cache_folder="/models",  
-        # force the model to run on CPU for compatibility with most environments
+        cache_folder="/models",  # This matches our volume mount
         model_kwargs={"device": "cpu"},
-        # normalize embeddings to ensure consistent vector magnitudes, which can improve 
-        # similarity calculations
         encode_kwargs={"normalize_embeddings": True},
     )
 
@@ -51,8 +46,6 @@ async def create_embedding(request: TextRequest):
         raise HTTPException(
             status_code=HTTP_503_SERVICE_UNAVAILABLE, detail="Model not initialized"
         )
-    # embed_query method will return a normalized embedding vector for the input text, 
-    # which is suitable for similarity comparisons and other downstream tasks.
     return embeddings.embed_query(request.text)
 
 
@@ -62,9 +55,6 @@ async def create_embeddings_batch(request: BatchTextRequest):
         raise HTTPException(
             status_code=HTTP_503_SERVICE_UNAVAILABLE, detail="Model not initialized"
         )
-    # embed_documents will return a list of normalized embedding vectors corresponding 
-    # to each input text, which can be used for batch processing and efficient similarity 
-    # calculations across multiple texts.
     return embeddings.embed_documents(request.texts)
 
 
