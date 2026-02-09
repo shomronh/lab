@@ -14,6 +14,7 @@ from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from langchain_text_splitters import TokenTextSplitter
 import aiohttp
 from fastapi.middleware.cors import CORSMiddleware
+import uuid
 
 # Configure logging to write to stdout immediately
 logging.basicConfig(
@@ -30,7 +31,6 @@ sys.stdout.reconfigure(line_buffering=True)
 app = FastAPI(title="PDF QA Service")
 app.add_middleware(
     CORSMiddleware,
-    # In production, you should restrict this to your frontend domain
     allow_origins=[
         "http://localhost",
         "http://localhost:*",
@@ -61,9 +61,6 @@ def format_phi_prompt(system_content: str, user_content: str) -> str:
     )
 
 
-# PyPDF2 can be slow, so we add logging and timing to monitor performance
-# In production, you might want to optimize this further or use a more 
-# efficient PDF parsing library
 def process_pdf(file_path: str) -> str:
     """Extract text from PDF using PyPDF2."""
     logger.info("📚 Starting PDF processing...")
@@ -79,7 +76,7 @@ def process_pdf(file_path: str) -> str:
             text += page.extract_text() + "\n\n"
 
         process_time = time.time() - process_start
-        
+
         if not text.strip():
             raise Exception("No text could be extracted from the PDF")
 
@@ -206,19 +203,6 @@ async def upload_pdf(file: UploadFile = File(...)):
         logger.info("✂️ Splitting text into chunks...")
         text_splitter = TokenTextSplitter(
             # Larger chunks make the invocation linearly slower
-            # chunk_size should be chosen based on the average 
-            # size of the documents and the LLM context window
-            # 
-            # For Phi-3.5-mini-instruct, a chunk size of 600 tokens 
-            # is a good balance
-            # 
-            # chunk_size is in tokens, not characters, so it can 
-            # be much smaller than the raw text length
-            # 
-            # chunk overlap can be added if you want to provide more context to the LLM,
-            # but it will increase the number of chunks and processing time significantly, 
-            # so we keep it at 0 for simplicity
-            # 
             chunk_size=600,
         )
         chunks = text_splitter.split_text(text)
@@ -228,7 +212,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         sample_embedding = get_embedding(chunks[0])
         vector_size = len(sample_embedding)
 
-        collection_name = f"{file.filename}"
+        collection_name = f"{file.filename}_{str(uuid.uuid4())}"
         setup_collection(collection_name, vector_size)
 
         logger.info("📥 Storing chunks in Qdrant...")
@@ -255,7 +239,6 @@ async def upload_pdf(file: UploadFile = File(...)):
                 for j, (text, embedding) in enumerate(zip(batch, embeddings))
             ]
 
-            # Upsert the batch of points to Qdrant
             qdrant_client.upsert(collection_name=collection_name, points=points)
 
         logger.info("🎉 PDF processing completed successfully!")
@@ -269,7 +252,6 @@ async def upload_pdf(file: UploadFile = File(...)):
         }
 
     finally:
-        # Clean up the temporary file
         if os.path.exists(temp_path):
             logger.info("🧹 Cleaning up temporary file...")
             os.remove(temp_path)
@@ -319,12 +301,10 @@ async def ask_question(request: QuestionRequest):
 
     async def generate_stream():
         try:
-            # Send metadata with context and sources before streaming the answer
             yield json.dumps(
                 {"type": "metadata", "context": context, "sources": sources}
             ) + "\n"
 
-            # Stream the answer chunks 
             async for chunk in query_llm(request.question, context):
                 yield json.dumps({"type": "chunk", "content": chunk}) + "\n"
 
@@ -340,18 +320,10 @@ async def list_pdfs():
     """List all available PDF collections"""
     try:
         collections = qdrant_client.get_collections()
-
-        # Filter collections that start with "pdf_" and return their names without the prefix
-        # This assumes that all PDF collections are named with a "pdf_" prefix, which is how 
-        # we name them in the upload endpoint
-        # In a production system, you might want to store metadata about collections in a 
-        # database instead of relying on naming conventions
         pdf_collections = [
-            {"id": collection.name, "name": collection.name.replace("pdf_", "")}
+            {"id": collection.name, "name": collection.name}
             for collection in collections.collections
-            if collection.name.startswith("pdf_")
         ]
-
         return {"pdfs": pdf_collections}
     except Exception as e:
         logger.error(f"❌ Error listing PDFs: {str(e)}")

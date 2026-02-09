@@ -9,7 +9,7 @@ services:
       - ../models:/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 600s
+      interval: 5s
       timeout: 5s
       retries: 5
       # Allows for initial model downloads
@@ -71,6 +71,15 @@ services:
         condition: service_healthy
       localai:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - pdfqa
 
 volumes:
   qdrant_storage:
