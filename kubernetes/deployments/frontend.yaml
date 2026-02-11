@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - image: httpd:alpine3.18
+          name: httpd
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+
+      # The maximum number of pods that can be unavailable during the update
+      # it can purcetage or number. If it's a percentage, it will be rounded down
+      # to an integer.
+      maxUnavailable: 1
+
+      # The maximum number of pods that can be created above the desired number
+      # of pods during the update
+      # it can purcetage or number. If it's a percentage, it will be rounded down
+      # to an integer.
+      maxSurge: 1
+
+      # meaning the deployment should update 2 pods at a time, and only 1 pod can be
+      # unavailable at a time.
