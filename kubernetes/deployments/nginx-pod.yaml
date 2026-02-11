@@ -7,21 +7,18 @@ spec:
   containers:
     - image: nginx
       name: nginx
-
-      # volumeMounts is a list of volumes that can be mounted by containers belonging to the Pod.
-      # the name of the volumeMount must match the name of a volume specified in the volumes section 
-      # of the Pod specification.
       volumeMounts:
         - mountPath: /scratch
           name: scratch-volume
-          
-  # volume being attached to the Pod itself and not to any specific container
-  # they can provisioned beforehand or dynamically provisioned using a StorageClass
+
+    - image: busybox
+      name: busybox
+      command: ["/bin/sh", "-c"] # override the default command to keep the container running
+      args: ["sleep 1000"] # sleep for 1000 seconds to keep the container running
+      volumeMounts:
+        - mountPath: /scratch
+          name: scratch-volume
   volumes:
     - name: scratch-volume
-
-      # emptyDir volumes are created when a Pod is assigned to a Node and exist as 
-      # long as that Pod is running on that Node. As the name suggests, they are 
-      # initially empty. 
       emptyDir:
         sizeLimit: 500Mi
