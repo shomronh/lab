@@ -20,6 +20,7 @@ spec:
           name: mealie
           ports:
             - containerPort: 9000
+          
           # mount the volume to the container
           volumeMounts:
             - name: mealie-data
