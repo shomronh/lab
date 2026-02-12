@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: grafana
+  name: grafana-loadbalancer
+  namespace: monitoring
+spec:
+  ports:
+    - port: 3000
+      protocol: TCP
+      targetPort: 3000
+
+  # The selector should match the labels of the Grafana pods created by the 
+  # Prometheus stack Helm chart.
+  selector:
+    app.kubernetes.io/instance: prometheus-stack
+    app.kubernetes.io/name: grafana
+
+  sessionAffinity: None
+  type: LoadBalancer
